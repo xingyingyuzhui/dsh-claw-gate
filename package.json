@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-gate",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Claw/session permission gate for DeepSeek Harness. 按分层权限拦截工具、钉官方沙箱、走一次性审批，并写审计。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "permissions", "gate"],
   "license": "MIT",
@@ -17,6 +17,7 @@
     "gate-audit.mjs",
     "gate-filter.mjs",
     "gate-skills.mjs",
+    "gate-mcp.mjs",
     "gate-i18n.mjs",
     "gate-styles.mjs",
     "gate-page.mjs",

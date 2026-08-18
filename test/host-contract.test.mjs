@@ -19,6 +19,6 @@ test('gate named exports and hooks', () => {
     effect() {},
   })
   assert.equal(guards.length, 1)
-  assert.deepEqual(events, ['agent/session-start', 'tools/pre-execute'])
+  assert.deepEqual(events, ['agent/session-start', 'tools/change', 'tools/pre-execute'])
   assert.deepEqual(routes, ['/dsh-agent-gate/audit', '/dsh-agent-gate/audit-export'])
 })

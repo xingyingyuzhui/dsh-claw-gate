@@ -6,6 +6,7 @@ import { denyReason } from '../dsh-session-permissions/perm-layers.mjs'
 import { applyOfficialPin, askReason } from '../dsh-session-permissions/perm-official.mjs'
 import { exportAudit, exportFilename, readAudit } from './gate-audit.mjs'
 import { deniedSkillNames, filterSnapshot } from './gate-skills.mjs'
+import { eachLiveAgent, hideDeniedMcp } from './gate-mcp.mjs'
 
 export const name = 'dsh-agent-gate'
 export const inject = ['tools', 'webServer', 'skills']
@@ -126,6 +127,19 @@ export function wrapSkills(skills, home) {
 
 export function apply(ctx) {
   const stopSkills = wrapSkills(ctx.skills, dshHome)
+  const hiddenMcp = new WeakMap()
+
+  function hideMcpFor(agent) {
+    const session = agent && agent.session
+    const layers = session ? layersOfSession(session) : null
+    if (!layers || !layers.effective) return
+    let seen = hiddenMcp.get(agent)
+    if (!seen) {
+      seen = new Set()
+      hiddenMcp.set(agent, seen)
+    }
+    hideDeniedMcp(agent, layers.effective, seen)
+  }
 
   const stopGuard = ctx.tools && typeof ctx.tools.guard === 'function'
     ? ctx.tools.guard((exec) => {
@@ -145,6 +159,13 @@ export function apply(ctx) {
       if (plan && plan.claw) {
         audit({ kind: 'pin', ...auditContext(session, plan) })
       }
+      hideMcpFor(payload && payload.agent)
+    })
+    : function () {}
+
+  const stopToolsChange = typeof ctx.on === 'function'
+    ? ctx.on('tools/change', () => {
+      eachLiveAgent(ctx.agents, hideMcpFor)
     })
     : function () {}
 
@@ -210,6 +231,7 @@ export function apply(ctx) {
     if (typeof stopSkills === 'function') stopSkills()
     if (typeof stopGuard === 'function') stopGuard()
     if (typeof stopStart === 'function') stopStart()
+    if (typeof stopToolsChange === 'function') stopToolsChange()
     if (typeof stopPre === 'function') stopPre()
     if (typeof stopAudit === 'function') stopAudit()
     if (typeof stopExport === 'function') stopExport()

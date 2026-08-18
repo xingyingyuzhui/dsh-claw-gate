@@ -37,6 +37,7 @@ test('unloading the gate restores skills and drops interceptors', async () => {
   assert.equal(guards.length, 0)
   assert.equal(events['tools/pre-execute'], undefined)
   assert.equal(events['agent/session-start'], undefined)
+  assert.equal(events['tools/change'], undefined)
 })
 
 test('official pin never widens a tighter sandbox after gate is gone', () => {
