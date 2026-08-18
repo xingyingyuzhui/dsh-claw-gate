@@ -2,6 +2,26 @@ import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import { apply, inject, name, MCP_REFRESH_MS } from '../host.js'
 
+test('session-start hides MCP and does not pin sandbox', () => {
+  const appended = []
+  const session = {
+    id: 'session-gate',
+    header: { cwd: '/Users/qin/.dsh/DSclaw/test1', agentPreset: 'standard' },
+    events: [],
+    append(type, data) { appended.push({ type, data }) },
+  }
+  const events = {}
+  apply({
+    tools: { guard() { return () => {} } },
+    webServer: { register() { return () => {} } },
+    skills: { async snapshot() { return { skills: [], complete: true } } },
+    on(name, fn) { events[name] = fn; return () => {} },
+    effect() {},
+  })
+  events['agent/session-start']({ agent: { session, tools: { list() { return [] } } } })
+  assert.equal(appended.length, 0)
+})
+
 test('gate named exports and hooks', () => {
   assert.equal(name, 'dsh-agent-gate')
   assert.deepEqual(inject, ['tools', 'webServer', 'skills', 'agents'])

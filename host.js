@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { defaultDshHome } from '../dsh-session-permissions/perm-store.mjs'
 import { resolveLayersSync } from '../dsh-session-permissions/perm-layers.mjs'
 import { denyReason } from '../dsh-session-permissions/perm-layers.mjs'
-import { applyOfficialPin, askReason } from '../dsh-session-permissions/perm-official.mjs'
+import { askReason } from '../dsh-session-permissions/perm-official.mjs'
 import { exportAudit, exportFilename, readAudit } from './gate-audit.mjs'
 import { deniedSkillNames, filterSnapshot } from './gate-skills.mjs'
 import { eachLiveAgent, emptyMcpState, hideDeniedMcp } from './gate-mcp.mjs'
@@ -81,13 +81,6 @@ function layersOfSession(session) {
     preset: header.agentPreset,
     events: session.events,
   })
-}
-
-function pinSession(session) {
-  const layers = layersOfSession(session)
-  if (!layers) return null
-  applyOfficialPin(session, layers)
-  return layers
 }
 
 function auditContext(session, layers) {
@@ -236,11 +229,6 @@ export function apply(ctx) {
 
   const stopStart = typeof ctx.on === 'function'
     ? ctx.on('agent/session-start', (payload) => {
-      const session = payload && payload.agent && payload.agent.session
-      const plan = pinSession(session)
-      if (plan && plan.claw) {
-        audit({ kind: 'pin', ...auditContext(session, plan) })
-      }
       hideMcpFor(payload && payload.agent)
     })
     : function () {}
@@ -277,7 +265,7 @@ export function apply(ctx) {
   const stopPre = typeof ctx.on === 'function'
     ? ctx.on('tools/pre-execute', (exec, next) => {
       const session = exec && exec.agent && exec.agent.session
-      const layers = pinSession(session) || (session ? layersOfSession(session) : null)
+      const layers = session ? layersOfSession(session) : null
       const reason = denyReason(dshHome, exec)
       if (reason) {
         logAuthorize(exec, 'deny', CODES.GATE_POLICY_DENIED, reason, layers)
