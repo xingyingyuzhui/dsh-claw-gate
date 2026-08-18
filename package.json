@@ -1,0 +1,38 @@
+{
+  "name": "dsh-agent-gate",
+  "version": "0.1.5",
+  "description": "Claw/session permission gate for DeepSeek Harness. 按分层权限拦截工具、钉官方沙箱、走一次性审批，并写审计。",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "permissions", "gate"],
+  "license": "MIT",
+  "type": "module",
+  "main": "./host.js",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "host.js",
+    "client.js",
+    "gate-audit.mjs",
+    "gate-filter.mjs",
+    "gate-skills.mjs",
+    "gate-i18n.mjs",
+    "gate-styles.mjs",
+    "gate-page.mjs",
+    "gate-runtime.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "build:check": "node scripts/build-client.mjs --check",
+    "test": "npm run build:check && node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web" }
+  }
+}
