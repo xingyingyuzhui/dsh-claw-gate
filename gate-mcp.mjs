@@ -11,24 +11,49 @@ export function deniedMcpNames(policy, schemas) {
   return deny
 }
 
-export function hideDeniedMcp(agent, policy, seen) {
+function sameNames(left, right) {
+  if (left.length !== right.length) return false
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return false
+  }
+  return true
+}
+
+export function emptyMcpState() {
+  return { names: [], dispose: null, busy: false }
+}
+
+export function hideDeniedMcp(agent, policy, state) {
   const tools = agent && agent.ctx && agent.ctx.tools
   if (!tools || typeof tools.restrict !== 'function') return []
+  const bag = state && typeof state === 'object' && !Array.isArray(state) && !(state instanceof Set)
+    ? state
+    : emptyMcpState()
+  if (bag.busy) return []
   let schemas = []
   try {
     schemas = typeof tools.schemas === 'function' ? (tools.schemas(agent) || []) : []
   } catch {
     return []
   }
-  const prev = seen || new Set()
-  const names = deniedMcpNames(policy, schemas).filter((name) => !prev.has(name))
-  if (names.length === 0) return []
+  const names = deniedMcpNames(policy, schemas).slice().sort()
+  if (sameNames(bag.names || [], names)) return []
+  bag.busy = true
   try {
-    tools.restrict({ deny: names })
-    for (let i = 0; i < names.length; i++) prev.add(names[i])
+    if (typeof bag.dispose === 'function') {
+      try { bag.dispose() } catch { /* already lifted */ }
+      bag.dispose = null
+    }
+    bag.names = names
+    if (names.length === 0) return []
+    bag.dispose = tools.restrict({ deny: names }) || null
     return names
   } catch {
+    bag.names = []
+    bag.dispose = null
     return []
+  } finally {
+    bag.busy = false
   }
 }
 

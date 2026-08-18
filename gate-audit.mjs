@@ -74,7 +74,35 @@ export function slugFromSessionBucket(name) {
   return match ? match[1] : ''
 }
 
+const INDEX_TTL_MS = 5000
+let sessionIndexCache = { home: '', agentsKey: '', at: 0, map: null }
+
+function agentsCacheKey(agents) {
+  const list = Array.isArray(agents) ? agents : []
+  let key = ''
+  for (let i = 0; i < list.length; i++) {
+    const agent = list[i]
+    if (!agent) continue
+    key += (agent.agentId || '') + ':' + (agent.slug || '') + ':' + (agent.title || '') + '|'
+  }
+  return key
+}
+
+export function clearSessionIndexCache() {
+  sessionIndexCache = { home: '', agentsKey: '', at: 0, map: null }
+}
+
 export function indexSessionAgents(home, agents) {
+  const now = Date.now()
+  const agentsKey = agentsCacheKey(agents)
+  if (
+    sessionIndexCache.map
+    && sessionIndexCache.home === home
+    && sessionIndexCache.agentsKey === agentsKey
+    && now - sessionIndexCache.at < INDEX_TTL_MS
+  ) {
+    return sessionIndexCache.map
+  }
   const bySlug = {}
   const list = Array.isArray(agents) ? agents : []
   for (let i = 0; i < list.length; i++) {
@@ -89,6 +117,7 @@ export function indexSessionAgents(home, agents) {
   try {
     buckets = readdirSync(root)
   } catch {
+    sessionIndexCache = { home, agentsKey, at: now, map }
     return map
   }
   for (let i = 0; i < buckets.length; i++) {
@@ -108,6 +137,7 @@ export function indexSessionAgents(home, agents) {
       map[id] = agent
     }
   }
+  sessionIndexCache = { home, agentsKey, at: now, map }
   return map
 }
 

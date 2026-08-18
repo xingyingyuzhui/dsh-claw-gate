@@ -1,19 +1,26 @@
-import { loadAgentHintSync } from '../dsh-session-permissions/perm-layers.mjs'
+import { resolveLayersSync } from '../dsh-session-permissions/perm-layers.mjs'
 
 export function lookupOf(options) {
   const value = options && typeof options === 'object' ? options : {}
+  const session = value.scope && value.scope.session
+  const header = session && session.header
   const cwd = typeof value.cwd === 'string' && value.cwd
     ? value.cwd
-    : (value.scope && value.scope.session && value.scope.session.header && value.scope.session.header.cwd) || ''
-  const preset = value.scope && value.scope.session && value.scope.session.header
-    ? value.scope.session.header.agentPreset
+    : (header && header.cwd) || ''
+  const preset = header
+    ? header.agentPreset
     : undefined
-  return { cwd, preset }
+  return {
+    cwd,
+    preset,
+    sessionId: session && session.id,
+    events: session && session.events,
+  }
 }
 
 export function deniedSkillNames(home, options) {
-  const agent = loadAgentHintSync(home, lookupOf(options))
-  const deny = agent && agent.policy && agent.policy.skills && agent.policy.skills.deny
+  const layers = resolveLayersSync(home, lookupOf(options))
+  const deny = layers && layers.effective && layers.effective.skills && layers.effective.skills.deny
   return Array.isArray(deny) ? deny.filter((name) => typeof name === 'string' && name) : []
 }
 

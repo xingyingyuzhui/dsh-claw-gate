@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
-import { auditFile, enrichAudit, exportAudit, exportFilename, readAudit, slugFromSessionBucket } from '../gate-audit.mjs'
+import { auditFile, clearSessionIndexCache, enrichAudit, exportAudit, exportFilename, indexSessionAgents, readAudit, slugFromSessionBucket } from '../gate-audit.mjs'
+import { auditOnce } from '../host.js'
 
 test('readAudit returns newest first and skips bad lines', async () => {
   const home = await mkdtemp(join(tmpdir(), 'dag-'))
@@ -64,4 +65,27 @@ test('enrichAudit fills agent title from the session bucket', async () => {
   ])
   assert.equal(rows[0].agentTitle, 'test1')
   assert.equal(rows[0].agentId, 'wa_1')
+})
+
+test('auditOnce writes the same deny only once', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dag-once-'))
+  const { _internal } = await import('../host.js')
+  _internal.setDshHome(home)
+  const row = { kind: 'deny', tool: 'bash', reason: 'BLOCKED', sessionId: 'session-a' }
+  assert.equal(auditOnce(row), true)
+  assert.equal(auditOnce(row), false)
+  const items = readAudit(home, 10)
+  assert.equal(items.filter((item) => item.tool === 'bash').length, 1)
+})
+
+test('session index cache reuses a hot map', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dag-idx-'))
+  const bucket = join(home, 'sessions', '--Users-qin-.dsh-DSclaw-test1--', 'session-old')
+  await mkdir(bucket, { recursive: true })
+  const agents = [{ agentId: 'wa_1', title: 'test1', slug: 'test1' }]
+  clearSessionIndexCache()
+  const first = indexSessionAgents(home, agents)
+  const second = indexSessionAgents(home, agents)
+  assert.equal(first, second)
+  assert.equal(first['session-old'].agentId, 'wa_1')
 })

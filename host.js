@@ -6,15 +6,20 @@ import { denyReason } from '../dsh-session-permissions/perm-layers.mjs'
 import { applyOfficialPin, askReason } from '../dsh-session-permissions/perm-official.mjs'
 import { exportAudit, exportFilename, readAudit } from './gate-audit.mjs'
 import { deniedSkillNames, filterSnapshot } from './gate-skills.mjs'
-import { eachLiveAgent, hideDeniedMcp } from './gate-mcp.mjs'
+import { eachLiveAgent, emptyMcpState, hideDeniedMcp } from './gate-mcp.mjs'
+import { CODES, operation, policyHash, setObserveHome } from '../dsh-observability/observe.mjs'
 
 export const name = 'dsh-agent-gate'
-export const inject = ['tools', 'webServer', 'skills']
+export const inject = ['tools', 'webServer', 'skills', 'agents']
+export const MCP_REFRESH_MS = 50
 
 let dshHome = defaultDshHome()
 
 const _internal = {
-  setDshHome(dir) { dshHome = dir },
+  setDshHome(dir) {
+    dshHome = dir
+    setObserveHome(dir)
+  },
   getDshHome() { return dshHome },
 }
 export { _internal }
@@ -102,26 +107,101 @@ function audit(row) {
     const file = join(dshHome, 'agent-gate', 'audit.jsonl')
     mkdirSync(dirname(file), { recursive: true })
     appendFileSync(file, JSON.stringify({ ...row, at: new Date().toISOString() }) + '\n')
-  } catch { /* best-effort */ }
+    return true
+  } catch (error) {
+    const op = operation({ plugin: 'dsh-agent-gate', feature: 'audit', operation: 'write_audit' })
+    op.start()
+    op.fail(CODES.GATE_AUDIT_WRITE_FAILED, error, { state: 'clean' })
+    return false
+  }
+}
+
+const recentAudit = new Map()
+
+export function auditKey(row) {
+  const value = row || {}
+  return [value.kind || '', value.sessionId || '', value.tool || '', value.reason || ''].join('\0')
+}
+
+function matchedLayerOf(layers) {
+  if (!layers) return 'unknown'
+  if (layers.session && layers.record && layers.record.source === 'session') return 'session'
+  if (layers.agent) return 'agent'
+  if (layers.claw) return 'workspace'
+  return 'official'
+}
+
+function logAuthorize(exec, decision, code, reason, layers) {
+  const session = exec && exec.agent && exec.agent.session
+  const op = operation({
+    plugin: 'dsh-agent-gate',
+    feature: 'authorize',
+    operation: 'authorize_tool',
+    sessionId: session && session.id,
+    agentId: layers && layers.agent && layers.agent.agentId,
+  })
+  op.start()
+  op.reject(code, {
+    tool: exec && exec.name,
+    decision,
+    matchedLayer: matchedLayerOf(layers),
+    reason,
+    policyHash: policyHash(layers && layers.effective),
+  })
+}
+
+export function auditOnce(row) {
+  const key = auditKey(row)
+  const now = Date.now()
+  const prev = recentAudit.get(key)
+  if (prev && now - prev < 1500) return false
+  recentAudit.set(key, now)
+  if (recentAudit.size > 64) {
+    const first = recentAudit.keys().next().value
+    recentAudit.delete(first)
+  }
+  audit({ ...row, id: key })
+  return true
 }
 
 export function wrapSkills(skills, home) {
   if (skills == null || typeof skills.snapshot !== 'function') return function () {}
   const origSnapshot = skills.snapshot.bind(skills)
   const origGet = typeof skills.get === 'function' ? skills.get.bind(skills) : null
-  skills.snapshot = async function (options) {
+  let live = true
+  async function snapshot(options) {
+    if (!live) return origSnapshot(options)
     const snap = await origSnapshot(options)
     return filterSnapshot(snap, deniedSkillNames(home, options))
   }
+  let getWrapped = null
+  skills.snapshot = snapshot
   if (origGet) {
-    skills.get = async function (name, options) {
+    getWrapped = async function get(name, options) {
+      if (!live) return origGet(name, options)
       if (deniedSkillNames(home, options).indexOf(name) >= 0) return undefined
       return origGet(name, options)
     }
+    skills.get = getWrapped
   }
   return function () {
-    skills.snapshot = origSnapshot
-    if (origGet) skills.get = origGet
+    live = false
+    if (skills.snapshot === snapshot) skills.snapshot = origSnapshot
+    if (origGet && skills.get === getWrapped) skills.get = origGet
+  }
+}
+
+function agentsOf(ctx) {
+  if (ctx && typeof ctx.get === 'function') {
+    try {
+      const got = ctx.get('agents')
+      if (got != null) return got
+    } catch { /* not injected */ }
+  }
+  try {
+    return ctx && ctx.agents
+  } catch {
+    return undefined
   }
 }
 
@@ -133,12 +213,12 @@ export function apply(ctx) {
     const session = agent && agent.session
     const layers = session ? layersOfSession(session) : null
     if (!layers || !layers.effective) return
-    let seen = hiddenMcp.get(agent)
-    if (!seen) {
-      seen = new Set()
-      hiddenMcp.set(agent, seen)
+    let state = hiddenMcp.get(agent)
+    if (!state) {
+      state = emptyMcpState()
+      hiddenMcp.set(agent, state)
     }
-    hideDeniedMcp(agent, layers.effective, seen)
+    hideDeniedMcp(agent, layers.effective, state)
   }
 
   const stopGuard = ctx.tools && typeof ctx.tools.guard === 'function'
@@ -146,7 +226,9 @@ export function apply(ctx) {
       const reason = denyReason(dshHome, exec)
       if (reason) {
         const session = exec && exec.agent && exec.agent.session
-        audit({ kind: 'deny', tool: exec && exec.name, reason, ...auditContext(session, layersOfSession(session)) })
+        const layers = layersOfSession(session)
+        logAuthorize(exec, 'deny', CODES.GATE_POLICY_DENIED, reason, layers)
+        auditOnce({ kind: 'deny', tool: exec && exec.name, reason, ...auditContext(session, layers) })
       }
       return reason
     })
@@ -163,9 +245,32 @@ export function apply(ctx) {
     })
     : function () {}
 
+  let mcpRefreshTimer = null
+  function refreshHiddenMcp() {
+    try {
+      eachLiveAgent(agentsOf(ctx), function (agent) {
+        try {
+          hideMcpFor(agent)
+        } catch (error) {
+          const op = operation({ plugin: 'dsh-agent-gate', feature: 'mcp', operation: 'refresh_mcp' })
+          op.start()
+          op.fail(CODES.GATE_TOOLS_CHANGE_FAILED, error, { state: 'clean' })
+        }
+      })
+    } catch (error) {
+      const op = operation({ plugin: 'dsh-agent-gate', feature: 'mcp', operation: 'refresh_mcp' })
+      op.start()
+      op.fail(CODES.GATE_TOOLS_CHANGE_FAILED, error, { state: 'clean' })
+    }
+  }
   const stopToolsChange = typeof ctx.on === 'function'
     ? ctx.on('tools/change', () => {
-      eachLiveAgent(ctx.agents, hideMcpFor)
+      if (mcpRefreshTimer != null) return
+      mcpRefreshTimer = setTimeout(() => {
+        mcpRefreshTimer = null
+        refreshHiddenMcp()
+      }, MCP_REFRESH_MS)
+      if (mcpRefreshTimer && typeof mcpRefreshTimer.unref === 'function') mcpRefreshTimer.unref()
     })
     : function () {}
 
@@ -175,13 +280,15 @@ export function apply(ctx) {
       const layers = pinSession(session) || (session ? layersOfSession(session) : null)
       const reason = denyReason(dshHome, exec)
       if (reason) {
-        audit({ kind: 'deny', tool: exec && exec.name, reason, ...auditContext(session, layers) })
+        logAuthorize(exec, 'deny', CODES.GATE_POLICY_DENIED, reason, layers)
+        auditOnce({ kind: 'deny', tool: exec && exec.name, reason, ...auditContext(session, layers) })
         return { kind: 'deny', reason }
       }
       const policy = layers && layers.effective
       const header = session && session.header
       const ask = askReason(policy, exec && exec.name, exec && exec.arguments, header && header.cwd)
       if (ask) {
+        logAuthorize(exec, 'ask', CODES.GATE_POLICY_ASK, ask, layers)
         audit({ kind: 'ask', tool: exec && exec.name, reason: ask, ...auditContext(session, layers) })
         return { kind: 'ask', reason: ask }
       }
@@ -228,6 +335,10 @@ export function apply(ctx) {
     : function () {}
 
   ctx.effect(() => () => {
+    if (mcpRefreshTimer != null) {
+      clearTimeout(mcpRefreshTimer)
+      mcpRefreshTimer = null
+    }
     if (typeof stopSkills === 'function') stopSkills()
     if (typeof stopGuard === 'function') stopGuard()
     if (typeof stopStart === 'function') stopStart()

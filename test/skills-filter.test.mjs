@@ -33,6 +33,44 @@ test('deniedSkillNames reads the agent deny list by cwd', async () => {
   assert.deepEqual(deniedSkillNames(home, { cwd: join(home, 'other') }), [])
 })
 
+test('deniedSkillNames uses session-level effective skill deny', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dag-sk-sess-'))
+  const root = join(home, 'DSclaw', 'test1')
+  const sessionId = 'session-cccccccc-dddd-eeee-ffff-000000000000'
+  await mkdir(join(home, 'workspace-agents'), { recursive: true })
+  await mkdir(join(home, 'session-permissions'), { recursive: true })
+  await mkdir(root, { recursive: true })
+  await writeFile(join(home, 'workspace-agents', 'registry.json'), JSON.stringify({
+    version: 1,
+    main: { agentId: 'main', createdAt: 't' },
+    agents: {
+      wa_1: {
+        agentId: 'wa_1',
+        workspaceId: '1',
+        canonicalRoot: root,
+        title: 'test1',
+        slug: 'test1',
+        preset: 'developer',
+        dshPreset: 'wa-test1',
+        status: 'active',
+        policy: { preset: 'developer', skills: { deny: ['bambu-labs'] } },
+      },
+    },
+  }))
+  await writeFile(join(home, 'session-permissions', sessionId + '.json'), JSON.stringify({
+    version: 1,
+    sessionId,
+    source: 'session',
+    policy: { preset: 'developer', skills: { deny: ['cad'] } },
+  }))
+  const denied = deniedSkillNames(home, {
+    cwd: root,
+    scope: { session: { id: sessionId, header: { cwd: root, agentPreset: 'wa-test1' }, events: [] } },
+  })
+  assert.ok(denied.includes('bambu-labs'))
+  assert.ok(denied.includes('cad'))
+})
+
 test('filterSnapshot drops denied names', () => {
   const next = filterSnapshot({
     complete: true,
@@ -81,4 +119,17 @@ test('wrapSkills filters snapshot and get, then restores', async () => {
   stop()
   const again = await skills.snapshot({ cwd: root })
   assert.equal(again.skills.length, 2)
+})
+
+test('wrapSkills dispose does not wipe a later wrapper', async () => {
+  const skills = {
+    async snapshot() { return { complete: true, skills: [{ name: 'keep' }] } },
+  }
+  const stop = wrapSkills(skills, join(tmpdir(), 'none'))
+  const ours = skills.snapshot
+  async function later() { return { complete: true, skills: [{ name: 'later' }] } }
+  skills.snapshot = later
+  stop()
+  assert.equal(skills.snapshot, later)
+  assert.notEqual(ours, later)
 })
