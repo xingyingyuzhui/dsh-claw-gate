@@ -69,8 +69,8 @@ function loadRegistryAgents(home) {
 }
 
 export function slugFromSessionBucket(name) {
-  const text = String(name || '')
-  const match = text.match(/DSclaw-([^/]+?)--?$/)
+  const text = String(name || '').replace(/\\/g, '/')
+  const match = text.match(/DSclaw-([^/]+?)--?$/i)
   return match ? match[1] : ''
 }
 

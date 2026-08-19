@@ -46,6 +46,8 @@ test('exportAudit writes jsonl and markdown without leaking a missing file', asy
 
 test('slugFromSessionBucket reads DSclaw folders', () => {
   assert.equal(slugFromSessionBucket('--Users-qin-.dsh-DSclaw-test1--'), 'test1')
+  assert.equal(slugFromSessionBucket('--Users-qin-.dsh-dsclaw-test1--'), 'test1')
+  assert.equal(slugFromSessionBucket('--C-Users-qin-.dsh-DSclaw-bot1--'), 'bot1')
   assert.equal(slugFromSessionBucket('--Users-qin-DSH--'), '')
 })
 
