@@ -205,7 +205,7 @@ export function apply(ctx) {
   function hideMcpFor(agent) {
     const session = agent && agent.session
     const layers = session ? layersOfSession(session) : null
-    if (!layers || !layers.effective) return
+    if (!layers || !layers.claw || !layers.effective) return
     let state = hiddenMcp.get(agent)
     if (!state) {
       state = emptyMcpState()
@@ -272,7 +272,8 @@ export function apply(ctx) {
         auditOnce({ kind: 'deny', tool: exec && exec.name, reason, ...auditContext(session, layers) })
         return { kind: 'deny', reason }
       }
-      const policy = layers && layers.effective
+      if (!layers || !layers.claw) return next()
+      const policy = layers.effective
       const header = session && session.header
       const ask = askReason(policy, exec && exec.name, exec && exec.arguments, header && header.cwd)
       if (ask) {

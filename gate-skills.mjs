@@ -20,7 +20,8 @@ export function lookupOf(options) {
 
 export function deniedSkillNames(home, options) {
   const layers = resolveLayersSync(home, lookupOf(options))
-  const deny = layers && layers.effective && layers.effective.skills && layers.effective.skills.deny
+  if (!layers || !layers.claw) return []
+  const deny = layers.effective && layers.effective.skills && layers.effective.skills.deny
   return Array.isArray(deny) ? deny.filter((name) => typeof name === 'string' && name) : []
 }
 
