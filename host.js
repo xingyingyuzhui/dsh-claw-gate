@@ -227,8 +227,10 @@ export function apply(ctx) {
     })
     : function () {}
 
+  // DSH 0.1.6+: agent/session-start removed; agent/created is serial and awaited
+  // before the first model request — hide MCP here so the first turn never sees it.
   const stopStart = typeof ctx.on === 'function'
-    ? ctx.on('agent/session-start', (payload) => {
+    ? ctx.on('agent/created', (payload) => {
       hideMcpFor(payload && payload.agent)
     })
     : function () {}

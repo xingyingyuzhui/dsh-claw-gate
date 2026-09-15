@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import { apply, inject, name, MCP_REFRESH_MS } from '../host.js'
 
-test('session-start hides MCP and does not pin sandbox', () => {
+test('agent/created hides MCP and does not pin sandbox', () => {
   const appended = []
   const session = {
     id: 'session-gate',
@@ -18,7 +18,7 @@ test('session-start hides MCP and does not pin sandbox', () => {
     on(name, fn) { events[name] = fn; return () => {} },
     effect() {},
   })
-  events['agent/session-start']({ agent: { session, tools: { list() { return [] } } } })
+  events['agent/created']({ agent: { session, tools: { list() { return [] } } }, source: 'startup' })
   assert.equal(appended.length, 0)
 })
 
@@ -39,7 +39,7 @@ test('gate named exports and hooks', () => {
     effect() {},
   })
   assert.equal(guards.length, 1)
-  assert.deepEqual(events, ['agent/session-start', 'tools/change', 'tools/pre-execute'])
+  assert.deepEqual(events, ['agent/created', 'tools/change', 'tools/pre-execute'])
   assert.deepEqual(routes, ['/dsh-agent-gate/audit', '/dsh-agent-gate/audit-export'])
 })
 

@@ -36,7 +36,7 @@ test('unloading the gate restores skills and drops interceptors', async () => {
   assert.equal(await skills.get('cad'), 'cad')
   assert.equal(guards.length, 0)
   assert.equal(events['tools/pre-execute'], undefined)
-  assert.equal(events['agent/session-start'], undefined)
+  assert.equal(events['agent/created'], undefined)
   assert.equal(events['tools/change'], undefined)
 })
 
