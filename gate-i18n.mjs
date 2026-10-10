@@ -1,4 +1,4 @@
-export const NS = 'dsh-agent-gate'
+export const NS = 'dsh-claw-gate'
 
 export const COPY = {
   zh: {

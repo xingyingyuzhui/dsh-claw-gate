@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { apply } from '../host.js'
-import { officialPin } from '../../dsh-session-permissions/perm-official.mjs'
-import { composeLayers } from '../../dsh-session-permissions/perm-layers.mjs'
-import { applyPreset, tighterSandbox } from '../../dsh-session-permissions/perm-schema.mjs'
+import { officialPin } from 'dsh-claw-permissions/official'
+import { composeLayers } from 'dsh-claw-permissions/layers'
+import { applyPreset, tighterSandbox } from 'dsh-claw-permissions/schema'
 
 test('unloading the gate restores skills and drops interceptors', async () => {
   const origSnapshot = async () => ({ skills: [{ name: 'cad' }], complete: true })
@@ -19,7 +19,7 @@ test('unloading the gate restores skills and drops interceptors', async () => {
         return () => { guards.pop() }
       },
     },
-    webServer: { register() { return () => {} } },
+    connection: { fetch: { register() { return () => {} } } },
     skills,
     on(name, fn) {
       events[name] = fn

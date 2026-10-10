@@ -1,4 +1,4 @@
-import { resolveLayersSync } from '../dsh-session-permissions/perm-layers.mjs'
+import { resolveLayersSync } from 'dsh-claw-permissions/layers'
 
 export function lookupOf(options) {
   const value = options && typeof options === 'object' ? options : {}

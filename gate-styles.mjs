@@ -1,4 +1,4 @@
-export const ATTR = 'data-dsh-agent-gate'
+export const ATTR = 'data-dsh-claw-gate'
 
 export const CSS = [
   'body[' + ATTR + '] .dag-page{display:flex;flex-direction:column;gap:12px;width:100%;max-width:760px;margin:0 auto;padding:8px 24px 36px;color:var(--dsw-alias-label-primary);box-sizing:border-box}',

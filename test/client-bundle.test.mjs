@@ -8,7 +8,7 @@ const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'cl
 
 test('generated client keeps the factory contract', () => {
   assert.match(src, /Do not edit by hand/)
-  assert.match(src, /id: 'dsh-agent-gate'/)
+  assert.match(src, /id: 'dsh-claw-gate'/)
   assert.match(src, /inject = \['slots', 'locale'\]/)
   assert.match(src, /return module\.exports/)
   assert.match(src, /settings\.section/)

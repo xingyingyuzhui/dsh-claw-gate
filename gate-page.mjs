@@ -35,7 +35,7 @@ export function createAuditPage(React, t, post, toast, subscribeLocale, ReactDOM
 
     const load = React.useCallback(() => {
       setBusy(true)
-      return post('/dsh-agent-gate/audit', { limit: 500 }).then((data) => {
+      return post('/api/dsh-claw/gate/audit', { limit: 500 }).then((data) => {
         setRows(Array.isArray(data.items) ? data.items : [])
       }).catch((err) => {
         toast(String(err.message || t('fail')))
@@ -186,7 +186,7 @@ export function registerSettings(ctx, React, t, Page) {
   return slots.inject('settings.section', function () {
     return slots.register({
       name: 'settings.section',
-      id: 'dsh-agent-gate',
+      id: 'dsh-claw-gate',
       order: 21,
       locale: NS,
       label() { return t('nav') },
