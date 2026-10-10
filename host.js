@@ -9,7 +9,7 @@ import { askReason } from 'dsh-claw-permissions/official'
 import { exportAudit, exportFilename, readAudit } from './gate-audit.mjs'
 import { deniedSkillNames, filterSnapshot } from './gate-skills.mjs'
 import { eachLiveAgent, emptyMcpState, hideDeniedMcp } from './gate-mcp.mjs'
-import { CODES, operation, policyHash, setObserveHome } from 'dsh-claw-observability/observe'
+import { CODES, operation, policyHash, runWithTrace, setObserveHome } from 'dsh-claw-observability/observe'
 
 export const CLAW_PERMISSIONS_UNAVAILABLE = 'Denied: claw permissions unavailable.'
 
@@ -262,7 +262,7 @@ export function apply(ctx) {
     : function () {}
 
   const stopPre = typeof ctx.on === 'function'
-    ? ctx.on('tools/pre-execute', (exec, next) => {
+    ? ctx.on('tools/pre-execute', (exec, next) => runWithTrace(exec, () => {
       const session = exec && exec.agent && exec.agent.session
       const clawGate = clawPermissionsDeny(session)
       if (clawGate && clawGate.reason) {
@@ -295,7 +295,7 @@ export function apply(ctx) {
         return { kind: 'ask', reason: ask }
       }
       return next()
-    })
+    }))
     : function () {}
 
   registerJsonRoute(ctx, {

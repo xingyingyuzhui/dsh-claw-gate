@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { mock, test } from 'node:test'
+import { setObserveHome } from 'dsh-claw-observability/observe'
 import { apply, inject, name, MCP_REFRESH_MS } from '../host.js'
+
+setObserveHome(mkdtempSync(join(tmpdir(), 'gate-observe-')))
 
 function fakeConnection() {
   const routes = []
