@@ -1,6 +1,6 @@
 {
   "name": "dsh-claw-gate",
-  "version": "0.3.0-rc.1",
+  "version": "0.3.0-rc.2",
   "description": "Claw/session permission gate for DeepSeek Harness. 按分层权限拦截工具、走一次性审批，并写审计。官方沙箱由权限插件钉。",
   "keywords": [
     "dsh",
@@ -41,9 +41,9 @@
     "test": "npm run build:check && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "dsh-claw-core": "0.3.0-rc.1",
-    "dsh-claw-permissions": "0.3.0-rc.1",
-    "dsh-claw-observability": "0.3.0-rc.1"
+    "dsh-claw-core": "0.3.0-rc.2",
+    "dsh-claw-permissions": "0.3.0-rc.2",
+    "dsh-claw-observability": "0.3.0-rc.2"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": "^0.2.0-rc.1"
