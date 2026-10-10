@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyPreset, normalizePolicy } from '../../dsh-agent-policy/policy-schema.mjs'
+import { applyPreset, normalizePolicy } from 'dsh-claw-policy/schema'
 import { deniedMcpNames, emptyMcpState, hideDeniedMcp } from '../gate-mcp.mjs'
 
 test('deniedMcpNames keeps allowed servers and drops the rest', () => {

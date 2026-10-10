@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { mock, test } from 'node:test'
+import { setObserveHome } from 'dsh-claw-observability/observe'
 import { apply, inject, name, MCP_REFRESH_MS } from '../host.js'
+
+setObserveHome(mkdtempSync(join(tmpdir(), 'gate-observe-')))
+
+function fakeConnection() {
+  const routes = []
+  return {
+    routes,
+    connection: {
+      fetch: {
+        register(entry) {
+          routes.push(entry)
+          return () => {}
+        },
+      },
+    },
+  }
+}
 
 test('agent/created hides MCP and does not pin sandbox', () => {
   const appended = []
@@ -11,9 +32,10 @@ test('agent/created hides MCP and does not pin sandbox', () => {
     append(type, data) { appended.push({ type, data }) },
   }
   const events = {}
+  const { connection } = fakeConnection()
   apply({
     tools: { guard() { return () => {} } },
-    webServer: { register() { return () => {} } },
+    connection,
     skills: { async snapshot() { return { skills: [], complete: true } } },
     on(name, fn) { events[name] = fn; return () => {} },
     effect() {},
@@ -23,14 +45,14 @@ test('agent/created hides MCP and does not pin sandbox', () => {
 })
 
 test('gate named exports and hooks', () => {
-  assert.equal(name, 'dsh-agent-gate')
-  assert.deepEqual(inject, ['tools', 'webServer', 'skills', 'agents'])
+  assert.equal(name, 'dsh-claw-gate')
+  assert.deepEqual(inject, ['tools', 'connection', 'skills', 'agents'])
   const guards = []
   const events = []
-  const routes = []
+  const { connection, routes } = fakeConnection()
   apply({
     tools: { guard(fn) { guards.push(fn); return () => {} } },
-    webServer: { register(row) { routes.push(row.path); return () => {} } },
+    connection,
     skills: {
       async snapshot() { return { skills: [], complete: true } },
       async get() { return undefined },
@@ -40,18 +62,28 @@ test('gate named exports and hooks', () => {
   })
   assert.equal(guards.length, 1)
   assert.deepEqual(events, ['agent/created', 'tools/change', 'tools/pre-execute'])
-  assert.deepEqual(routes, ['/dsh-agent-gate/audit', '/dsh-agent-gate/audit-export'])
+  assert.deepEqual(routes.map((row) => row.path), [
+    '/api/dsh-claw/gate/audit',
+    '/api/dsh-claw/gate/audit-export',
+  ])
+  for (const row of routes) {
+    assert.deepEqual(row.methods, ['POST'])
+    assert.equal(row.requestBody, 'buffered')
+    assert.equal(typeof row.fetch, 'function')
+  }
 })
 
 test('tools/change walks injected agents and does not throw without them', () => {
   const events = {}
   const seen = []
+  const { connection } = fakeConnection()
   apply({
     tools: { guard() { return () => {} } },
-    webServer: { register() { return () => {} } },
+    connection,
     skills: { async snapshot() { return { skills: [], complete: true } } },
     agents: {
-      values() { return [{ id: 'agent-1', session: { id: 's1', header: {}, events: [] } }] },
+      list() { return [{ id: 'agent-1', session: { id: 's1', header: {}, events: [] } }] },
+      values() { throw new Error('agents.values must not be called') },
     },
     on(event, fn) { events[event] = fn; return () => {} },
     effect() {},
@@ -60,9 +92,10 @@ test('tools/change walks injected agents and does not throw without them', () =>
   events['tools/change']()
   seen.push('with-agents')
   const missing = {}
+  const again = fakeConnection()
   apply({
     tools: { guard() { return () => {} } },
-    webServer: { register() { return () => {} } },
+    connection: again.connection,
     skills: { async snapshot() { return { skills: [], complete: true } } },
     get(key) {
       if (key === 'agents') throw new Error('cannot get property "agents" without inject')
@@ -81,15 +114,17 @@ test('tools/change coalesces bursts and never throws out of the listener', () =>
     const events = {}
     let scans = 0
     let stop
+    const { connection } = fakeConnection()
     apply({
       tools: { guard() { return () => {} } },
-      webServer: { register() { return () => {} } },
+      connection,
       skills: { async snapshot() { return { skills: [], complete: true } } },
       agents: {
-        values() {
+        list() {
           scans += 1
           throw new Error('scan exploded')
         },
+        values() { throw new Error('agents.values must not be called') },
       },
       on(event, fn) { events[event] = fn; return () => {} },
       effect(fn) { stop = fn() },
@@ -102,4 +137,25 @@ test('tools/change coalesces bursts and never throws out of the listener', () =>
   } finally {
     mock.timers.reset()
   }
+})
+
+test('audit route answers via Connection Fetch Request/Response', async () => {
+  const { connection, routes } = fakeConnection()
+  apply({
+    tools: { guard() { return () => {} } },
+    connection,
+    skills: { async snapshot() { return { skills: [], complete: true } } },
+    on() { return () => {} },
+    effect() {},
+  })
+  const audit = routes.find((row) => row.path === '/api/dsh-claw/gate/audit')
+  assert.ok(audit)
+  const res = await audit.fetch(new Request('dsh-app://host/api/dsh-claw/gate/audit', {
+    method: 'POST',
+    body: JSON.stringify({ limit: 10 }),
+  }))
+  assert.equal(res.status, 200)
+  const payload = await res.json()
+  assert.equal(payload.ok, true)
+  assert.ok(Array.isArray(payload.items))
 })

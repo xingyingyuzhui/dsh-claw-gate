@@ -38,7 +38,7 @@ export function applyClient(ctx) {
   function post(path, payload) {
     return fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-DSH-Agent-Gate': '1' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || {}),
     }).then((res) => res.json().then((data) => {
       if (!res.ok && (!data || data.ok !== true)) throw new Error((data && data.error) || ('http ' + res.status))

@@ -1,8 +1,14 @@
 {
-  "name": "dsh-agent-gate",
-  "version": "0.1.14",
+  "name": "dsh-claw-gate",
+  "version": "0.3.0-rc.2",
   "description": "Claw/session permission gate for DeepSeek Harness. 按分层权限拦截工具、走一次性审批，并写审计。官方沙箱由权限插件钉。",
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "permissions", "gate"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "permissions",
+    "gate"
+  ],
   "license": "MIT",
   "type": "module",
   "main": "./host.js",
@@ -26,14 +32,28 @@
     "README.md",
     "LICENSE"
   ],
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "build:check": "node scripts/build-client.mjs --check",
     "test": "npm run build:check && node --test test/*.test.mjs"
   },
+  "dependencies": {
+    "dsh-claw-core": "0.3.0-rc.2",
+    "dsh-claw-permissions": "0.3.0-rc.2",
+    "dsh-claw-observability": "0.3.0-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.2.0-rc.1"
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "platform": "web" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
   }
 }

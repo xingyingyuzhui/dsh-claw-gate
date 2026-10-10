@@ -1,4 +1,4 @@
 # dsh bundle layer: layered permission gate + official sandbox pin.
 - insert:
-    - id: dsh-agent-gate
-      name: dsh-agent-gate
+    - id: dsh-claw-gate
+      name: dsh-claw-gate

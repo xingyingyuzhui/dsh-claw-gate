@@ -1,4 +1,5 @@
-import { allowTool } from '../dsh-session-permissions/perm-schema.mjs'
+import { forEachLiveAgent } from 'dsh-claw-core/live-agents'
+import { allowTool } from 'dsh-claw-permissions/schema'
 
 export function deniedMcpNames(policy, schemas) {
   const list = Array.isArray(schemas) ? schemas : []
@@ -58,13 +59,5 @@ export function hideDeniedMcp(agent, policy, state) {
 }
 
 export function eachLiveAgent(agents, fn) {
-  if (!agents) return
-  if (typeof agents.values === 'function') {
-    for (const agent of agents.values()) fn(agent)
-    return
-  }
-  if (typeof agents.list === 'function') {
-    const list = agents.list()
-    if (Array.isArray(list)) list.forEach(fn)
-  }
+  forEachLiveAgent(agents, fn)
 }

@@ -1,16 +1,20 @@
 import { mkdirSync, appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { defaultDshHome } from '../dsh-session-permissions/perm-store.mjs'
-import { resolveLayersSync } from '../dsh-session-permissions/perm-layers.mjs'
-import { denyReason } from '../dsh-session-permissions/perm-layers.mjs'
-import { askReason } from '../dsh-session-permissions/perm-official.mjs'
+import { classifySession } from 'dsh-claw-core/session-classifier'
+import { registerJsonRoute } from 'dsh-claw-core/http'
+import { defaultDshHome } from 'dsh-claw-permissions/store'
+import { resolveLayersSync } from 'dsh-claw-permissions/layers'
+import { denyReason } from 'dsh-claw-permissions/layers'
+import { askReason } from 'dsh-claw-permissions/official'
 import { exportAudit, exportFilename, readAudit } from './gate-audit.mjs'
 import { deniedSkillNames, filterSnapshot } from './gate-skills.mjs'
 import { eachLiveAgent, emptyMcpState, hideDeniedMcp } from './gate-mcp.mjs'
-import { CODES, operation, policyHash, setObserveHome } from '../dsh-observability/observe.mjs'
+import { CODES, operation, policyHash, runWithTrace, setObserveHome } from 'dsh-claw-observability/observe'
 
-export const name = 'dsh-agent-gate'
-export const inject = ['tools', 'webServer', 'skills', 'agents']
+export const CLAW_PERMISSIONS_UNAVAILABLE = 'Denied: claw permissions unavailable.'
+
+export const name = 'dsh-claw-gate'
+export const inject = ['tools', 'connection', 'skills', 'agents']
 export const MCP_REFRESH_MS = 50
 
 let dshHome = defaultDshHome()
@@ -24,54 +28,6 @@ const _internal = {
 }
 export { _internal }
 
-const BODY_CAP = 65536
-const LOOPBACK_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/
-
-const writeJson = (res, status, body) => {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-  res.end(JSON.stringify(body))
-}
-
-const readJsonBody = (req, cap = BODY_CAP) => new Promise((resolveBody, reject) => {
-  let size = 0
-  const chunks = []
-  req.on('data', (chunk) => {
-    size += chunk.length
-    if (size > cap) {
-      reject(new Error('body too large'))
-      req.destroy()
-      return
-    }
-    chunks.push(chunk)
-  })
-  req.on('end', () => {
-    try {
-      resolveBody(chunks.length === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString('utf8')))
-    } catch {
-      reject(new Error('invalid json body'))
-    }
-  })
-  req.on('error', reject)
-})
-
-const guard = (req, res) => {
-  if (req.method !== 'POST') {
-    writeJson(res, 405, { ok: false, error: 'method not allowed' })
-    return false
-  }
-  const headers = req.headers || {}
-  if (headers['x-dsh-agent-gate'] !== '1') {
-    writeJson(res, 403, { ok: false, error: 'missing csrf header' })
-    return false
-  }
-  const origin = headers.origin
-  if (origin !== undefined && origin !== null && !LOOPBACK_ORIGIN.test(origin)) {
-    writeJson(res, 403, { ok: false, error: 'origin not allowed' })
-    return false
-  }
-  return true
-}
-
 function layersOfSession(session) {
   if (!session || !session.id) return null
   const header = session.header || {}
@@ -81,6 +37,35 @@ function layersOfSession(session) {
     preset: header.agentPreset,
     events: session.events,
   })
+}
+
+function sessionKind(session) {
+  const header = (session && session.header) || {}
+  return classifySession({
+    dshHome,
+    cwd: header.cwd,
+    agentPreset: header.agentPreset,
+  })
+}
+
+/**
+ * For claw / claw-uncertain sessions, permissions layers must be available.
+ * Returns a stable deny reason when layers are missing or resolve throws.
+ * Ordinary sessions skip this fail-closed path.
+ */
+function clawPermissionsDeny(session) {
+  const kind = sessionKind(session)
+  if (kind !== 'claw' && kind !== 'claw-uncertain') return null
+  let layers
+  try {
+    layers = layersOfSession(session)
+  } catch {
+    return { reason: CLAW_PERMISSIONS_UNAVAILABLE, layers: null }
+  }
+  if (!layers || !layers.effective) {
+    return { reason: CLAW_PERMISSIONS_UNAVAILABLE, layers: layers || null }
+  }
+  return { reason: null, layers }
 }
 
 function auditContext(session, layers) {
@@ -102,7 +87,7 @@ function audit(row) {
     appendFileSync(file, JSON.stringify({ ...row, at: new Date().toISOString() }) + '\n')
     return true
   } catch (error) {
-    const op = operation({ plugin: 'dsh-agent-gate', feature: 'audit', operation: 'write_audit' })
+    const op = operation({ plugin: 'dsh-claw-gate', feature: 'audit', operation: 'write_audit' })
     op.start()
     op.fail(CODES.GATE_AUDIT_WRITE_FAILED, error, { state: 'clean' })
     return false
@@ -127,7 +112,7 @@ function matchedLayerOf(layers) {
 function logAuthorize(exec, decision, code, reason, layers) {
   const session = exec && exec.agent && exec.agent.session
   const op = operation({
-    plugin: 'dsh-agent-gate',
+    plugin: 'dsh-claw-gate',
     feature: 'authorize',
     operation: 'authorize_tool',
     sessionId: session && session.id,
@@ -216,10 +201,22 @@ export function apply(ctx) {
 
   const stopGuard = ctx.tools && typeof ctx.tools.guard === 'function'
     ? ctx.tools.guard((exec) => {
+      const session = exec && exec.agent && exec.agent.session
+      const clawGate = clawPermissionsDeny(session)
+      if (clawGate && clawGate.reason) {
+        logAuthorize(exec, 'deny', CODES.GATE_PERMISSIONS_UNAVAILABLE, clawGate.reason, clawGate.layers)
+        auditOnce({
+          kind: 'deny',
+          tool: exec && exec.name,
+          reason: clawGate.reason,
+          code: CODES.GATE_PERMISSIONS_UNAVAILABLE,
+          ...auditContext(session, clawGate.layers),
+        })
+        return clawGate.reason
+      }
       const reason = denyReason(dshHome, exec)
       if (reason) {
-        const session = exec && exec.agent && exec.agent.session
-        const layers = layersOfSession(session)
+        const layers = clawGate && clawGate.layers != null ? clawGate.layers : layersOfSession(session)
         logAuthorize(exec, 'deny', CODES.GATE_POLICY_DENIED, reason, layers)
         auditOnce({ kind: 'deny', tool: exec && exec.name, reason, ...auditContext(session, layers) })
       }
@@ -242,13 +239,13 @@ export function apply(ctx) {
         try {
           hideMcpFor(agent)
         } catch (error) {
-          const op = operation({ plugin: 'dsh-agent-gate', feature: 'mcp', operation: 'refresh_mcp' })
+          const op = operation({ plugin: 'dsh-claw-gate', feature: 'mcp', operation: 'refresh_mcp' })
           op.start()
           op.fail(CODES.GATE_TOOLS_CHANGE_FAILED, error, { state: 'clean' })
         }
       })
     } catch (error) {
-      const op = operation({ plugin: 'dsh-agent-gate', feature: 'mcp', operation: 'refresh_mcp' })
+      const op = operation({ plugin: 'dsh-claw-gate', feature: 'mcp', operation: 'refresh_mcp' })
       op.start()
       op.fail(CODES.GATE_TOOLS_CHANGE_FAILED, error, { state: 'clean' })
     }
@@ -265,9 +262,23 @@ export function apply(ctx) {
     : function () {}
 
   const stopPre = typeof ctx.on === 'function'
-    ? ctx.on('tools/pre-execute', (exec, next) => {
+    ? ctx.on('tools/pre-execute', (exec, next) => runWithTrace(exec, () => {
       const session = exec && exec.agent && exec.agent.session
-      const layers = session ? layersOfSession(session) : null
+      const clawGate = clawPermissionsDeny(session)
+      if (clawGate && clawGate.reason) {
+        logAuthorize(exec, 'deny', CODES.GATE_PERMISSIONS_UNAVAILABLE, clawGate.reason, clawGate.layers)
+        auditOnce({
+          kind: 'deny',
+          tool: exec && exec.name,
+          reason: clawGate.reason,
+          code: CODES.GATE_PERMISSIONS_UNAVAILABLE,
+          ...auditContext(session, clawGate.layers),
+        })
+        return { kind: 'deny', reason: clawGate.reason }
+      }
+      const layers = clawGate && clawGate.layers != null
+        ? clawGate.layers
+        : (session ? layersOfSession(session) : null)
       const reason = denyReason(dshHome, exec)
       if (reason) {
         logAuthorize(exec, 'deny', CODES.GATE_POLICY_DENIED, reason, layers)
@@ -284,46 +295,27 @@ export function apply(ctx) {
         return { kind: 'ask', reason: ask }
       }
       return next()
-    })
+    }))
     : function () {}
 
-  const handle = (fn) => async (req, res) => {
-    if (!guard(req, res)) return
-    try {
-      const body = await readJsonBody(req)
-      await fn(req, res, body)
-    } catch (err) {
-      writeJson(res, 400, { ok: false, error: String(err.message || err) })
-    }
-  }
+  registerJsonRoute(ctx, {
+    path: '/api/dsh-claw/gate/audit',
+    handle: async (body) => ({ items: readAudit(dshHome, body && body.limit) }),
+  })
 
-  const stopAudit = ctx.webServer && typeof ctx.webServer.register === 'function'
-    ? ctx.webServer.register({
-      kind: 'exact',
-      path: '/dsh-agent-gate/audit',
-      handler: handle(async (_req, res, body) => {
-        writeJson(res, 200, { ok: true, items: readAudit(dshHome, body && body.limit) })
-      }),
-    })
-    : function () {}
-
-  const stopExport = ctx.webServer && typeof ctx.webServer.register === 'function'
-    ? ctx.webServer.register({
-      kind: 'exact',
-      path: '/dsh-agent-gate/audit-export',
-      handler: handle(async (_req, res, body) => {
-        const format = body && (body.format === 'md' || body.format === 'markdown') ? 'md' : 'jsonl'
-        const text = exportAudit(dshHome, format, body && body.query)
-        writeJson(res, 200, {
-          ok: true,
-          format,
-          filename: exportFilename(format),
-          type: format === 'md' ? 'text/markdown;charset=utf-8' : 'application/jsonl;charset=utf-8',
-          text,
-        })
-      }),
-    })
-    : function () {}
+  registerJsonRoute(ctx, {
+    path: '/api/dsh-claw/gate/audit-export',
+    handle: async (body) => {
+      const format = body && (body.format === 'md' || body.format === 'markdown') ? 'md' : 'jsonl'
+      const text = exportAudit(dshHome, format, body && body.query)
+      return {
+        format,
+        filename: exportFilename(format),
+        type: format === 'md' ? 'text/markdown;charset=utf-8' : 'application/jsonl;charset=utf-8',
+        text,
+      }
+    },
+  })
 
   ctx.effect(() => () => {
     if (mcpRefreshTimer != null) {
@@ -335,7 +327,5 @@ export function apply(ctx) {
     if (typeof stopStart === 'function') stopStart()
     if (typeof stopToolsChange === 'function') stopToolsChange()
     if (typeof stopPre === 'function') stopPre()
-    if (typeof stopAudit === 'function') stopAudit()
-    if (typeof stopExport === 'function') stopExport()
   })
 }
